@@ -1,0 +1,257 @@
+//SERVER
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+struct sockaddr_in serv_addr, cli_addr;
+int listenfd, connfd, r, w, val;
+socklen_t cli_addr_len;
+unsigned short serv_port = 25022;
+char serv_ip[] = "127.0.0.1";
+char buff[128];
+
+int main() {
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(serv_port);
+    inet_aton(serv_ip, (&serv_addr.sin_addr));
+
+    printf("\nTCP COMMAND FILE SERVER.\n");
+
+    if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("\nSERVER ERROR: Cannot create socket.\n");
+        exit(1);
+    }
+
+    if ((bind(listenfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) < 0) {
+        printf("\nSERVER ERROR: Cannot bind.\n");
+        close(listenfd);
+        exit(1);
+    }
+
+    if ((listen(listenfd, 5)) < 0) {
+        printf("\nSERVER ERROR: Cannot listen.\n");
+        close(listenfd);
+        exit(1);
+    }
+
+    cli_addr_len = sizeof(cli_addr);
+    int b = 0;
+    char ch1;
+
+    for (;;) {
+        printf("\nSERVER: Listening for clients... Press Ctrl + C to stop:\n");
+
+        if ((connfd = accept(listenfd, (struct sockaddr *)&cli_addr, &cli_addr_len)) < 0 && b == 1) {
+            printf("\nSERVER ERROR: Cannot accept client connections.\n");
+            close(listenfd);
+            exit(1);
+        }
+
+        printf("\nSERVER: Connection from client %s incoming. Accept (y/n)?\n", inet_ntoa(cli_addr.sin_addr));
+        scanf("%c", &ch1);
+        getchar();
+
+        if (ch1 == 'n' || ch1 == 'N') {
+            printf("Kicking client...");
+            strcpy(buff, "exit");
+            write(connfd, buff, strlen(buff));
+            close(connfd);
+            b = 0;
+            continue;
+        } else {
+            printf("Client accepted\n");
+            strcpy(buff, "continue");
+            write(connfd, buff, strlen(buff));
+            b = 1;
+
+            while (1) {
+                bzero(buff, 128);
+
+                if ((r = read(connfd, buff, 128)) < 0) {
+                    printf("\nSERVER ERROR: Cannot receive message from client.\n");
+                } else {
+                    if (strcmp(buff, "exit") == 0) {
+                        printf("Client exited\n");
+                        close(connfd);
+                        b = 0;
+                        break;
+                    } else {
+                        system("ls > op.txt");
+                        char data[500] = "op.txt";
+                        write(connfd, data, 100);
+
+                        bzero(buff, 128);
+                        read(connfd, buff, 128);
+                        buff[strcspn(buff, "\n")] = 0;
+
+                        char cmd[1000] = "cat ";
+                        strcat(cmd, buff);
+                        strcat(cmd, " > op1.txt 2>&1");
+                        printf("Command is %s", cmd);
+                        system(cmd);
+
+                        strcpy(data, "op1.txt");
+                        if ((w = write(connfd, data, 100)) < 0)
+                            printf("\nSERVER ERROR: Cannot send message to the client.\n");
+                        else
+                            printf("\nSERVER: Echoed back %s to %s.\n", data, inet_ntoa(cli_addr.sin_addr));
+
+                        printf("Press 1 to shut down server\nPress 2 to disconnect client\nPress any other number to continue\n");
+                        int ch2;
+                        scanf("%d", &ch2);
+
+                        if (ch2 == 1) {
+                            strcpy(buff, "shut");
+                            write(connfd, buff, strlen(buff));
+                            close(listenfd);
+                            close(connfd);
+                            exit(0);
+                        } else if (ch2 == 2) {
+                            strcpy(buff, "exit");
+                            write(connfd, buff, strlen(buff));
+                            close(connfd);
+                            break;
+                        } else {
+                            strcpy(buff, "continue");
+                            write(connfd, buff, strlen(buff));
+                            continue;
+                        }
+                        bzero(buff, 128);
+                    }
+                }
+            }
+        }
+    }
+
+    close(listenfd);
+}
+
+
+//CLIENT
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+struct sockaddr_in serv_addr;
+int skfd, r, w;
+unsigned short serv_port = 25022;
+char serv_ip[] = "127.0.0.1";
+char rbuff[128];
+char sbuff[128];
+
+int main() {
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(serv_port);
+    inet_aton(serv_ip, (&serv_addr.sin_addr));
+
+    printf("\nTCP COMMAND FILE CLIENT.\n");
+
+    if ((skfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("\nCLIENT ERROR: Cannot create socket.\n");
+        exit(1);
+    }
+
+    if ((connect(skfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) < 0) {
+        printf("\nCLIENT ERROR: Cannot connect to the server.\n");
+        close(skfd);
+        exit(1);
+    }
+
+    printf("Waiting for server...");
+    read(skfd, rbuff, 128);
+
+    if (strcmp(rbuff, "exit") == 0) {
+        printf("Server Kicked You!");
+        close(skfd);
+        exit(0);
+    }
+
+    printf("\nCLIENT: Connected to the server.\n");
+
+    int ch1;
+
+    while (1) {
+        printf("\n1. get file\n2. exit\n");
+        scanf("%d", &ch1);
+        getchar();
+
+        if (ch1 == 2) {
+            strcpy(sbuff, "exit");
+            write(skfd, sbuff, strlen(sbuff));
+            exit(0);
+        }
+
+        strcpy(sbuff, "continue");
+        write(skfd, sbuff, strlen(sbuff));
+
+        bzero(rbuff, 128);
+        read(skfd, rbuff, 128);
+
+        char s;
+        FILE *fp = fopen(rbuff, "r");
+
+        while ((s = fgetc(fp)) != EOF) {
+            printf("%c", s);
+        }
+
+        fclose(fp);
+
+        printf("\nEnter the file you want to read: ");
+        bzero(sbuff, 128);
+        fgets(sbuff, 128, stdin);
+
+        if ((w = write(skfd, sbuff, 128)) < 0) {
+            printf("\nCLIENT ERROR: Cannot send message to the echo server.\n");
+            close(skfd);
+            exit(1);
+        }
+
+        printf("\nCLIENT: Message sent to server.\n");
+
+        bzero(rbuff, 128);
+
+        if ((r = read(skfd, rbuff, 128)) < 0) {
+            printf("\nCLIENT ERROR: Cannot receive message from server.\n");
+        } else {
+            printf("\nCLIENT: Message from server: %s\nContents of %s are:\n", rbuff, rbuff);
+            FILE *fp = fopen(rbuff, "r");
+
+            while ((s = fgetc(fp)) != EOF) {
+                printf("%c", s);
+            }
+
+            fclose(fp);
+        }
+
+        printf("\nWaiting for server...");
+        bzero(sbuff, 128);
+        read(skfd, sbuff, 128);
+
+        if (strcmp(sbuff, "shut") == 0) {
+            printf("Server shut down\n");
+            break;
+        } else if (strcmp(sbuff, "exit") == 0) {
+            printf("Server kicked you!\n");
+            break;
+        }
+
+        bzero(rbuff, 128);
+    }
+
+    close(skfd);
+    exit(1);
+}
