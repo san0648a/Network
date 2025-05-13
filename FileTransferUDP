@@ -1,0 +1,222 @@
+//SERVER
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+struct sockaddr_in serv_addr, cli_addr;
+int sockfd, r, w, val;
+socklen_t cli_addr_len;
+unsigned short serv_port = 25022;
+char buff[128];
+
+int main() {
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("SERVER ERROR: Cannot create socket");
+        exit(1);
+    }
+
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(serv_port);
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("SERVER ERROR: Cannot bind");
+        close(sockfd);
+        exit(1);
+    }
+
+    printf("\nUDP COMMAND FILE SERVER STARTED.\n");
+
+    cli_addr_len = sizeof(cli_addr);
+    int connected = 0;
+    char ch1;
+
+    while (1) {
+        printf("\nSERVER: Waiting for connection request...\n");
+        r = recvfrom(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&cli_addr, &cli_addr_len);
+        buff[r] = '\0';
+
+        if (strcmp(buff, "connect") == 0) {
+            printf("SERVER: Client from %s requested connection. Accept (y/n)? ", inet_ntoa(cli_addr.sin_addr));
+            scanf("%c", &ch1);
+            getchar();
+
+            if (ch1 == 'n' || ch1 == 'N') {
+                strcpy(buff, "exit");
+                sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+                continue;
+            }
+
+            strcpy(buff, "connected");
+            sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+            connected = 1;
+
+            while (connected) {
+                bzero(buff, 128);
+                r = recvfrom(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&cli_addr, &cli_addr_len);
+                buff[r] = '\0';
+
+                if (strcmp(buff, "exit") == 0) {
+                    printf("SERVER: Client exited.\n");
+                    connected = 0;
+                    break;
+                }
+
+                system("ls > op.txt");
+                strcpy(buff, "op.txt");
+                sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+
+                r = recvfrom(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&cli_addr, &cli_addr_len);
+                buff[r] = '\0';
+
+                char cmd[256] = "cat ";
+                strcat(cmd, buff);
+                strcat(cmd, " > op1.txt 2>&1");
+                system(cmd);
+
+                strcpy(buff, "op1.txt");
+                sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+
+                printf("\n1. Shut down server\n2. Disconnect client\nAny other key to continue\n");
+                int ch2;
+                scanf("%d", &ch2);
+
+                if (ch2 == 1) {
+                    strcpy(buff, "shut");
+                    sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+                    close(sockfd);
+                    exit(0);
+                } else if (ch2 == 2) {
+                    strcpy(buff, "exit");
+                    sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+                    connected = 0;
+                    break;
+                } else {
+                    strcpy(buff, "continue");
+                    sendto(sockfd, buff, strlen(buff), 0, (struct sockaddr*)&cli_addr, cli_addr_len);
+                }
+            }
+        }
+    }
+
+    close(sockfd);
+    return 0;
+}
+
+
+//CLIENT
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+struct sockaddr_in serv_addr;
+int sockfd, r, w;
+unsigned short serv_port = 25022;
+char serv_ip[] = "127.0.0.1";
+char rbuff[128];
+char sbuff[128];
+
+int main() {
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("CLIENT ERROR: Cannot create socket");
+        exit(1);
+    }
+
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(serv_port);
+    inet_aton(serv_ip, &serv_addr.sin_addr);
+    socklen_t serv_len = sizeof(serv_addr);
+
+    printf("\nUDP COMMAND FILE CLIENT\n");
+
+    strcpy(sbuff, "connect");
+    sendto(sockfd, sbuff, strlen(sbuff), 0, (struct sockaddr*)&serv_addr, serv_len);
+
+    r = recvfrom(sockfd, rbuff, sizeof(rbuff), 0, (struct sockaddr*)&serv_addr, &serv_len);
+    rbuff[r] = '\0';
+
+    if (strcmp(rbuff, "exit") == 0) {
+        printf("CLIENT: Server rejected connection.\n");
+        close(sockfd);
+        exit(0);
+    }
+
+    printf("CLIENT: Connected to server.\n");
+
+    int choice;
+    while (1) {
+        printf("\n1. Get file\n2. Exit\nEnter choice: ");
+        scanf("%d", &choice);
+        getchar();
+
+        if (choice == 2) {
+            strcpy(sbuff, "exit");
+            sendto(sockfd, sbuff, strlen(sbuff), 0, (struct sockaddr*)&serv_addr, serv_len);
+            break;
+        }
+
+        strcpy(sbuff, "continue");
+        sendto(sockfd, sbuff, strlen(sbuff), 0, (struct sockaddr*)&serv_addr, serv_len);
+
+        r = recvfrom(sockfd, rbuff, sizeof(rbuff), 0, (struct sockaddr*)&serv_addr, &serv_len);
+        rbuff[r] = '\0';
+
+        FILE *fp = fopen(rbuff, "r");
+        char ch;
+        if (fp) {
+            printf("\nFile list:\n");
+            while ((ch = fgetc(fp)) != EOF)
+                printf("%c", ch);
+            fclose(fp);
+        }
+
+        printf("\nEnter filename to read: ");
+        fgets(sbuff, sizeof(sbuff), stdin);
+        sbuff[strcspn(sbuff, "\n")] = 0;
+
+        sendto(sockfd, sbuff, strlen(sbuff), 0, (struct sockaddr*)&serv_addr, serv_len);
+
+        r = recvfrom(sockfd, rbuff, sizeof(rbuff), 0, (struct sockaddr*)&serv_addr, &serv_len);
+        rbuff[r] = '\0';
+
+        printf("\nCLIENT: Receiving file: %s\n", rbuff);
+        fp = fopen(rbuff, "r");
+        if (fp) {
+            while ((ch = fgetc(fp)) != EOF)
+                printf("%c", ch);
+            fclose(fp);
+        } else {
+            printf("Cannot open file.\n");
+        }
+
+        r = recvfrom(sockfd, sbuff, sizeof(sbuff), 0, (struct sockaddr*)&serv_addr, &serv_len);
+        sbuff[r] = '\0';
+
+        if (strcmp(sbuff, "shut") == 0) {
+            printf("\nCLIENT: Server shut down.\n");
+            break;
+        } else if (strcmp(sbuff, "exit") == 0) {
+            printf("\nCLIENT: Server disconnected you.\n");
+            break;
+        }
+    }
+
+    close(sockfd);
+    return 0;
+}
